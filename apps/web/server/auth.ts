@@ -92,6 +92,7 @@ const ROUTE_RULES: { method: string; pattern: RegExp; rule: RouteRule }[] = [
   { method: "POST", pattern: /^\/api\/tasks\/[^/]+\/review$/, rule: { allow: ["agent:worker"], scope: "task:review" } },
   { method: "POST", pattern: /^\/api\/tasks\/[^/]+\/assign$/, rule: { allow: ["agent:worker", "agent:leader"], scope: "task:assign" } },
   { method: "POST", pattern: /^\/api\/tasks\/[^/]+\/release$/, rule: { allow: ["machine", "agent:worker", "agent:leader"], scope: "task:release" } },
+  { method: "POST", pattern: /^\/api\/tasks\/[^/]+\/stop$/, rule: { allow: ["user", "machine", "agent:leader"], scope: "task:stop" } },
   { method: "POST", pattern: /^\/api\/tasks\/[^/]+\/complete$/, rule: { allow: ["user", "machine", "agent:leader"], scope: "task:complete" } },
   { method: "POST", pattern: /^\/api\/tasks\/[^/]+\/cancel$/, rule: { allow: ["user", "machine", "agent:leader"], scope: "task:cancel" } },
   { method: "POST", pattern: /^\/api\/tasks\/[^/]+\/reject$/, rule: { allow: ["user", "agent:leader"], scope: "task:reject" } },
@@ -242,7 +243,7 @@ async function authenticateAkAgent(c: Context<{ Bindings: Env }>, token: string,
 
   const leader = row.kind === "leader";
   const scopes = leader
-    ? ["task:assign", "task:complete", "task:reject", "task:cancel", "task:log", "task:message", "agent:usage", "ak:read", "ak:write"]
+    ? ["task:assign", "task:complete", "task:reject", "task:cancel", "task:stop", "task:log", "task:message", "agent:usage", "ak:read", "ak:write"]
     : ["task:claim", "task:review", "task:log", "task:message", "agent:usage", "ak:read"];
   c.set("principal", { source: "session", type: "agent", subjectId: row.agent_id, tenantId: row.owner_id, scopes });
   c.set("ownerId", row.owner_id);

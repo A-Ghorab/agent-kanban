@@ -6,12 +6,13 @@ describe("task statuses", () => {
     expect(TASK_STATUSES[2]).toBe("in_review");
   });
 
-  it("TASK_STATUSES includes 'cancelled' at position 4", () => {
-    expect(TASK_STATUSES[4]).toBe("cancelled");
+  it("TASK_STATUSES includes 'stopped' before 'cancelled'", () => {
+    expect(TASK_STATUSES[4]).toBe("stopped");
+    expect(TASK_STATUSES[5]).toBe("cancelled");
   });
 
   it("TASK_STATUSES has the full ordered list", () => {
-    expect([...TASK_STATUSES]).toEqual(["todo", "in_progress", "in_review", "done", "cancelled"]);
+    expect([...TASK_STATUSES]).toEqual(["todo", "in_progress", "in_review", "done", "stopped", "cancelled"]);
   });
 
   it("'in_review' comes after 'in_progress' and before 'done'", () => {

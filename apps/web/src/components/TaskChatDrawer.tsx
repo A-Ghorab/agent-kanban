@@ -76,7 +76,7 @@ export function TaskChatDrawer({ open, onOpenChange, taskId, task, showOverlay =
             <ChatPanel
               taskId={taskId}
               agentId={currentTask?.assigned_to ?? null}
-              taskDone={currentTask?.status === "done" || currentTask?.status === "cancelled"}
+              taskDone={currentTask?.status === "done" || currentTask?.status === "stopped" || currentTask?.status === "cancelled"}
               amaSessionId={hasAmaSession ? (amaSessionId ?? "available") : null}
               relaySessionId={relaySessionId}
             />

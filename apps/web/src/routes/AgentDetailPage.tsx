@@ -27,6 +27,7 @@ const taskStatusStyles: Record<string, string> = {
   in_progress: "bg-accent/15 text-accent",
   in_review: "bg-yellow-500/15 text-yellow-500",
   done: "bg-green-500/15 text-green-500",
+  stopped: "bg-amber-500/15 text-amber-500",
   todo: "bg-zinc-500/15 text-content-tertiary",
   cancelled: "bg-red-500/15 text-red-500",
 };

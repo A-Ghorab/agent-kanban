@@ -221,12 +221,13 @@ const DONE_DELAY = Math.max(...T.map((e) => e.delay)) + 1000;
 
 // ─── Hook ───
 
-const STATUSES = ["todo", "in_progress", "in_review", "done", "cancelled"] as const;
+const STATUSES = ["todo", "in_progress", "in_review", "done", "stopped", "cancelled"] as const;
 const LABELS: Record<string, string> = {
   todo: "Todo",
   in_progress: "In Progress",
   in_review: "In Review",
   done: "Done",
+  stopped: "Stopped",
   cancelled: "Cancelled",
 };
 

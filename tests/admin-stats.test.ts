@@ -58,12 +58,13 @@ describe("getSystemStats", () => {
     expect(typeof stats.agents.online).toBe("number");
   });
 
-  it("returns tasks with all five status fields", async () => {
+  it("returns tasks with all status fields", async () => {
     const stats = await getSystemStats(env.DB);
     expect(typeof stats.tasks.todo).toBe("number");
     expect(typeof stats.tasks.in_progress).toBe("number");
     expect(typeof stats.tasks.in_review).toBe("number");
     expect(typeof stats.tasks.done).toBe("number");
+    expect(typeof stats.tasks.stopped).toBe("number");
     expect(typeof stats.tasks.cancelled).toBe("number");
   });
 
@@ -88,6 +89,7 @@ describe("getSystemStats", () => {
     expect(stats.tasks.in_progress).toBe(0);
     expect(stats.tasks.in_review).toBe(0);
     expect(stats.tasks.done).toBe(0);
+    expect(stats.tasks.stopped).toBe(0);
     expect(stats.tasks.cancelled).toBe(0);
   });
 

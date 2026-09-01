@@ -23,7 +23,7 @@ export async function resolveAssignableWorkerRuntimeSource(
   ownerId: string,
   agentId: string,
   missingStatus: 400 | 404,
-): Promise<TaskRuntimeSource> {
+): Promise<{ source: TaskRuntimeSource; runtime: AgentRuntime }> {
   const agent = await getAgent(db, agentId, ownerId);
   if (!agent) throw new HTTPException(missingStatus, { message: "Agent not found" });
   if (agent.kind !== "worker") throw new HTTPException(400, { message: "Tasks can only be assigned to worker agents" });
@@ -31,14 +31,16 @@ export async function resolveAssignableWorkerRuntimeSource(
     throw new HTTPException(409, { message: "Agent is tainted NoSchedule and cannot be assigned normal tasks" });
   }
 
-  const runtime = agent.runtime as AgentRuntime;
-  const source = selectRuntimeSource(await resolveRuntimeSourceAvailability(db, env, ownerId, runtime, agent.model));
-  if (!source) {
-    throw new HTTPException(409, {
-      message: `Runtime "${runtime}" is not available on any AMA runner or online legacy machine.`,
-    });
+  const primaryRuntime = agent.runtime as AgentRuntime;
+  const connectors = (agent.connectors?.length ? agent.connectors : [primaryRuntime]) as AgentRuntime[];
+  const runtimes = [primaryRuntime, ...connectors.filter((runtime) => runtime !== primaryRuntime)];
+  for (const runtime of runtimes) {
+    const source = selectRuntimeSource(await resolveRuntimeSourceAvailability(db, env, ownerId, runtime, agent.model));
+    if (source) return { source, runtime };
   }
-  return source;
+  throw new HTTPException(409, {
+    message: `Agent "${agent.username}" has no available connector runtime on AMA runners or online legacy machines.`,
+  });
 }
 
 export async function dispatchAssignedTask(db: D1, env: Env, ownerId: string, task: Task, options: DispatchOptions): Promise<Task> {
@@ -86,4 +88,11 @@ export async function routePendingTasks(db: D1, env: Env): Promise<void> {
     if (!(await compareAndSetTaskRuntimeSource(db, row.id, row.assignedTo, row.current, next))) continue;
     logger.info(`task runtime source selected task=${row.id} runtime=${runtime} previous=${row.current ?? "unrouted"} next=${next}`);
   }
+}
+
+// Throws a compatibility 409 for old callers expecting this helper.
+export function unavailableRuntimeError(runtime: string): never {
+  throw new HTTPException(409, {
+    message: `Runtime "${runtime}" is not available on any AMA runner or online legacy machine.`,
+  });
 }

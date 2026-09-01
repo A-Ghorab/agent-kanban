@@ -11,6 +11,7 @@ export function isBoardType(value: string): value is BoardType {
 export interface Board {
   id: string;
   owner_id: string;
+  workspace_id: string;
   name: string;
   description: string | null;
   type: BoardType;
@@ -27,7 +28,18 @@ export interface BoardWithTasks extends Board {
 
 // ─── Task ───
 
-export type TaskStatus = "todo" | "in_progress" | "in_review" | "done" | "cancelled";
+export type TaskStatus = "todo" | "in_progress" | "in_review" | "done" | "stopped" | "cancelled";
+
+export type StoryType = "story" | "epic";
+
+export interface WorkHarnessItem {
+  id: string;
+  title: string;
+  completed: boolean;
+  notes?: string | null;
+  created_by?: string | null;
+  updated_at?: string | null;
+}
 
 export interface Task {
   id: string;
@@ -43,6 +55,8 @@ export interface Task {
   pr_url: string | null;
   input: Record<string, unknown> | null;
   metadata: Record<string, unknown>;
+  story_type: StoryType;
+  harness: WorkHarnessItem[] | null;
   created_from: string | null;
   scheduled_at: string | null;
   position: number;
@@ -75,6 +89,7 @@ export type TaskActionType =
   | "released"
   | "timed_out"
   | "cancelled"
+  | "stopped"
   | "rejected"
   | "review_requested"
   | "dispatched"
@@ -181,6 +196,7 @@ export interface AgentStatus {
     in_progress: number;
     in_review: number;
     done: number;
+    stopped: number;
     cancelled: number;
   };
 }
@@ -293,6 +309,7 @@ export interface Agent {
   kind: AgentKind;
   handoff_to: string[] | null;
   runtime: AnyAgentRuntime;
+  connectors: AgentRuntime[] | null;
   model: string | null;
   skills: string[] | null;
   subagents: string[] | null;
@@ -372,6 +389,15 @@ export interface Repository {
   task_count?: number;
   full_name: string;
   app_status?: RepoAppStatus;
+}
+
+export interface Workspace {
+  id: string;
+  owner_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface GithubAppConfig {
@@ -478,6 +504,8 @@ export interface CreateTaskInput {
   depends_on?: string[];
   created_from?: string;
   scheduled_at?: string;
+  story_type?: StoryType;
+  harness?: WorkHarnessItem[];
 }
 
 export interface AssignTaskInput {
@@ -493,6 +521,7 @@ export interface CreateAgentInput {
   kind?: AgentKind;
   handoff_to?: string[];
   runtime: AnyAgentRuntime;
+  connectors?: AgentRuntime[];
   model?: string;
   skills?: string[];
   subagents?: string[];
@@ -526,6 +555,7 @@ export interface CreateBoardInput {
   name: string;
   description?: string;
   type: BoardType;
+  workspace_id?: string;
 }
 
 export interface CreateRepositoryInput {

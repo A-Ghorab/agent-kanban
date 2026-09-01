@@ -7,8 +7,9 @@ export type TaskTransition =
   | "review" // in_progress → in_review
   | "reject" // in_review → in_progress
   | "complete" // in_review → done
+  | "stop" // todo|in_progress|in_review → stopped
   | "cancel" // todo|in_progress|in_review → cancelled
-  | "release"; // in_progress → todo (machine only, stale timeout)
+  | "release"; // in_progress|stopped → todo
 
 interface TransitionDef {
   from: TaskStatus[];
@@ -21,10 +22,11 @@ const TRANSITIONS: Record<TaskTransition, TransitionDef> = {
   review: { from: ["in_progress"], to: "in_review", allow: ["agent:worker"] },
   reject: { from: ["in_review"], to: "in_progress", allow: ["user", "agent:leader", "agent:maintainer"] },
   complete: { from: ["in_review"], to: "done", allow: ["user", "machine", "agent:leader", "agent:maintainer"] },
+  stop: { from: ["todo", "in_progress", "in_review"], to: "stopped", allow: ["user", "machine", "agent:leader", "agent:maintainer"] },
   // todo is cancellable too: an assigned todo task keeps getting re-dispatched
   // by the sweep, so cancel must be able to stop it before any agent claims it.
   cancel: { from: ["todo", "in_progress", "in_review"], to: "cancelled", allow: ["user", "machine", "agent:leader", "agent:maintainer"] },
-  release: { from: ["in_progress"], to: "todo", allow: ["machine", "agent:leader", "agent:maintainer"] },
+  release: { from: ["in_progress", "stopped"], to: "todo", allow: ["machine", "agent:leader", "agent:maintainer"] },
 };
 
 export interface TransitionError {

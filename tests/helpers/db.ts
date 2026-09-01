@@ -71,6 +71,8 @@ export async function applyMigrations(db: D1Database) {
     "0040_ama_resource_initialization_claims.sql",
     "0041_drop_realmroot_identity_mappings.sql",
     "0042_realmroot_user_ama_grants.sql",
+    "0043_workspaces_harness_connectors.sql",
+    "0044_task_actions_stopped_action.sql",
   ];
   for (const file of files) {
     const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf-8");

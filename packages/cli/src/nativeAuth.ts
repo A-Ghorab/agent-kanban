@@ -8,7 +8,7 @@ const DEFAULT_ISSUER = "https://id.realmroot.dev/api/auth";
 const LOOPBACK_REDIRECT_URI = "http://127.0.0.1:49173/oauth/callback";
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 const AK_NATIVE_SCOPES =
-  "openid profile email offline_access ak:read ak:write task:claim task:assign task:release task:review task:complete task:reject task:cancel task:log task:message agent:usage";
+  "openid profile email offline_access ak:read ak:write task:claim task:assign task:release task:review task:complete task:reject task:cancel task:stop task:log task:message agent:usage";
 
 type StoredAuthority = {
   accessToken: string;

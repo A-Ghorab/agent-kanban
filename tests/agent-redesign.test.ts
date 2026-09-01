@@ -166,6 +166,7 @@ describe("agent CRUD", () => {
         in_progress: 0,
         in_review: 0,
         done: 0,
+        stopped: 0,
         cancelled: 0,
       },
     });
@@ -202,6 +203,7 @@ describe("agent task status count computation", () => {
       in_progress: 0,
       in_review: 0,
       done: 0,
+      stopped: 0,
       cancelled: 0,
     });
   });
@@ -210,7 +212,7 @@ describe("agent task status count computation", () => {
     const { createBoard } = await import("../apps/web/server/boardRepo");
     const { createTask } = await import("../apps/web/server/taskRepo");
     const board = await createBoard(env.DB, userId, "Status board", "ops");
-    const statuses = ["todo", "in_progress", "in_review", "done", "cancelled"] as const;
+    const statuses = ["todo", "in_progress", "in_review", "done", "stopped", "cancelled"] as const;
     for (const status of statuses) {
       const task = await createTask(env.DB, userId, {
         board_id: board.id,
@@ -228,6 +230,7 @@ describe("agent task status count computation", () => {
       in_progress: 1,
       in_review: 1,
       done: 1,
+      stopped: 1,
       cancelled: 1,
     });
   });
@@ -244,6 +247,7 @@ describe("agent task status count computation", () => {
       in_progress: 1,
       in_review: 1,
       done: 1,
+      stopped: 1,
       cancelled: 1,
     });
   });

@@ -136,6 +136,7 @@ describe("agent runtime load fields", () => {
         in_progress: 1,
         in_review: 0,
         done: 0,
+        stopped: 0,
         cancelled: 0,
       },
     });
@@ -146,6 +147,7 @@ describe("agent runtime load fields", () => {
         in_progress: 1,
         in_review: 0,
         done: 0,
+        stopped: 0,
         cancelled: 0,
       },
     });

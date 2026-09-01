@@ -96,7 +96,10 @@ export async function dispatchTaskToAma(
   const amaProjectId = await requireAmaProjectId(db, ownerId);
   const akAgent = await getAgent(db, assignedTo, ownerId);
   if (!akAgent) throw new HTTPException(404, { message: "Assigned agent not found" });
-  const amaRuntime = amaRuntimeName(akAgent.runtime);
+  const runtimeHint = stringAnnotation(taskAnnotations(task), "runtime.connector");
+  const selectedRuntime =
+    runtimeHint && (akAgent.connectors?.includes(runtimeHint as any) || akAgent.runtime === runtimeHint) ? runtimeHint : akAgent.runtime;
+  const amaRuntime = amaRuntimeName(selectedRuntime);
   // The AMA agent is created eagerly when the AK agent is created; dispatch
   // reads the stored id and never creates one.
   const amaAgentId = await getAgentAmaId(db, assignedTo);
@@ -132,10 +135,10 @@ export async function dispatchTaskToAma(
   // environments (gated on a runnable runner) and cloud-sandbox environments
   // (AMA scales sandboxes per session, so no runner gate). A user with no
   // suitable machine or sandbox cannot run the task.
-  const candidates = await listMachineEnvironmentCandidatesForRuntime(db, ownerId, akAgent.runtime);
+  const candidates = await listMachineEnvironmentCandidatesForRuntime(db, ownerId, selectedRuntime);
   if (candidates.length === 0) {
     throw new HTTPException(409, {
-      message: `Runtime "${akAgent.runtime}" has no machine or cloud sandbox; add a machine or cloud sandbox to run tasks`,
+      message: `Runtime "${selectedRuntime}" has no machine or cloud sandbox; add a machine or cloud sandbox to run tasks`,
     });
   }
   const cloudCandidate = candidates.find((candidate) => candidate.hosting === "cloud");
@@ -727,7 +730,7 @@ export async function reconcileAmaBoundTasks(db: D1, env: Env): Promise<void> {
     .prepare(`
       SELECT t.id, t.status, b.owner_id FROM tasks t
       JOIN boards b ON t.board_id = b.id
-      WHERE t.status IN ('todo', 'in_progress', 'done', 'cancelled')
+      WHERE t.status IN ('todo', 'in_progress', 'done', 'stopped', 'cancelled')
         AND json_extract(t.metadata, '$.annotations."ama.sessionId"') IS NOT NULL
         AND (
           json_extract(t.metadata, '$.annotations."agentSessionId"') IS NOT NULL
@@ -739,7 +742,7 @@ export async function reconcileAmaBoundTasks(db: D1, env: Env): Promise<void> {
     try {
       const task = await getTask(db, row.id, row.owner_id);
       if (!task) continue;
-      if (row.status === "done" || row.status === "cancelled") {
+      if (row.status === "done" || row.status === "stopped" || row.status === "cancelled") {
         await releaseTaskRuntimeBinding(db, env, row.owner_id, task);
         continue;
       }

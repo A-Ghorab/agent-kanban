@@ -3,7 +3,7 @@ import type { D1 } from "./db";
 export interface SystemStats {
   agents: { total: number; online: number };
   machines: { total: number; online: number };
-  tasks: { todo: number; in_progress: number; in_review: number; done: number; cancelled: number };
+  tasks: { todo: number; in_progress: number; in_review: number; done: number; stopped: number; cancelled: number };
   boards: { total: number };
   runtime_sessions: { total: number; active: number };
 }
@@ -35,7 +35,7 @@ export async function getSystemStats(db: D1): Promise<SystemStats> {
       ),
     ]);
 
-  const taskCounts = { todo: 0, in_progress: 0, in_review: 0, done: 0, cancelled: 0 };
+  const taskCounts = { todo: 0, in_progress: 0, in_review: 0, done: 0, stopped: 0, cancelled: 0 };
   for (const row of tasksByStatus.results as TaskStatusRow[]) {
     const s = row.status as keyof typeof taskCounts;
     if (s in taskCounts) taskCounts[s] = row.count;

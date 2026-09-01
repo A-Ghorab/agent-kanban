@@ -83,7 +83,7 @@ describe("Realmroot native CLI authority", () => {
     expect(authorization.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:49173/oauth/callback");
     expect(authorization.searchParams.get("resource")).toBe("https://ak.example.test/api");
     expect(authorization.searchParams.get("scope")).toBe(
-      "openid profile email offline_access ak:read ak:write task:claim task:assign task:release task:review task:complete task:reject task:cancel task:log task:message agent:usage",
+      "openid profile email offline_access ak:read ak:write task:claim task:assign task:release task:review task:complete task:reject task:cancel task:stop task:log task:message agent:usage",
     );
     expect(authorization.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");

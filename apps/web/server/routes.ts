@@ -143,7 +143,7 @@ import { getMachineMetrics } from "./metricsRepo";
 import { listRuntimeModels } from "./modelCatalog";
 import { AK_SCOPES, beginRealmrootLogin, endRealmrootWebSession, finishRealmrootLogin, readRealmrootWebSession, resourceUrl } from "./realmrootAuth";
 import { createRepository, deleteRepository, getRepository, listRepositories, normalizeGitUrl } from "./repositoryRepo";
-import { metadataWithRuntimeSource, taskRuntimeSource } from "./runtimeBinding";
+import { metadataWithRuntimeRouting, taskRuntimeSource } from "./runtimeBinding";
 import { dispatchAssignedTask, releaseAssignedTaskRuntime, resolveAssignableWorkerRuntimeSource } from "./runtimeCoordinator";
 import { amaRunnerHeartbeatFresh, listAvailableRuntimeSources } from "./runtimeRouter";
 import { createSSEResponse } from "./sse";
@@ -180,9 +180,12 @@ import {
   rejectTask,
   releaseTask,
   reviewTask,
+  stopTask,
   rollbackTaskAssignment,
   updateTask,
 } from "./taskRepo";
+import { listWorkspaceRepositories, recordWorkspaceRepository } from "./workspaceRepositoryRepo";
+import { createWorkspace, getWorkspace, listWorkspaces } from "./workspaceRepo";
 import type { Env } from "./types";
 
 const api = new Hono<{ Bindings: Env }>();
@@ -284,6 +287,21 @@ function assertValidAgentRuntime(runtime: string | undefined, kind: "worker" | "
   }
 }
 
+function assertValidAgentConnectors(connectors: unknown, runtime: string | undefined): void {
+  if (connectors === undefined || connectors === null) return;
+  if (!Array.isArray(connectors) || connectors.length === 0 || connectors.some((connector) => typeof connector !== "string")) {
+    throw new HTTPException(400, { message: "connectors must be a non-empty array of runtime names" });
+  }
+  for (const connector of connectors) {
+    if (!AGENT_RUNTIMES.includes(connector as AgentRuntime)) {
+      throw new HTTPException(400, { message: `Invalid connector runtime "${connector}". Must be one of: ${AGENT_RUNTIMES.join(", ")}` });
+    }
+  }
+  if (runtime && !connectors.includes(runtime)) {
+    throw new HTTPException(400, { message: "connectors must include the agent primary runtime" });
+  }
+}
+
 function assertKnownAgentRuntime(runtime: string | undefined): void {
   if (runtime === undefined) return;
   if (![...AGENT_RUNTIMES, ...LEADER_AGENT_RUNTIMES].includes(runtime as never)) {
@@ -296,7 +314,8 @@ function assertKnownAgentRuntime(runtime: string | undefined): void {
 function withRuntimeSource<T extends Record<string, any>>(env: Env, agent: T, availableRuntimes?: Set<string>): T {
   if (!isAmaTaskDispatchConfigured(env)) return agent;
   if (availableRuntimes === undefined) return agent;
-  return withAgentStatus(agent as any, availableRuntimes.has(agent.runtime)) as unknown as T;
+  const connectors = Array.isArray(agent.connectors) && agent.connectors.length > 0 ? agent.connectors : [agent.runtime];
+  return withAgentStatus(agent as any, connectors.some((runtime: string) => availableRuntimes.has(runtime))) as unknown as T;
 }
 
 function parseOptionalBoolean(value: string | undefined, name: string): boolean | undefined {
@@ -327,6 +346,31 @@ function normalizeTaskDetailAlias(body: Record<string, any>) {
     body.description = body.detail;
   }
   delete body.detail;
+}
+
+function normalizeTaskHarness(body: Record<string, any>) {
+  if (body.story_type !== undefined && body.story_type !== "story" && body.story_type !== "epic") {
+    throw new HTTPException(400, { message: "story_type must be story or epic" });
+  }
+  if (body.harness === undefined || body.harness === null) return;
+  if (!Array.isArray(body.harness)) throw new HTTPException(400, { message: "harness must be an array" });
+  body.harness = body.harness.map((item: unknown, index: number) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new HTTPException(400, { message: `harness[${index}] must be an object` });
+    }
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.title !== "string" || entry.title.trim().length === 0) {
+      throw new HTTPException(400, { message: `harness[${index}].title is required` });
+    }
+    return {
+      id: typeof entry.id === "string" && entry.id.length > 0 ? entry.id : newLongId(),
+      title: entry.title.trim(),
+      completed: Boolean(entry.completed),
+      notes: typeof entry.notes === "string" ? entry.notes : null,
+      created_by: typeof entry.created_by === "string" ? entry.created_by : null,
+      updated_at: new Date().toISOString(),
+    };
+  });
 }
 
 async function assertRegisteredSubagents(
@@ -780,7 +824,7 @@ async function isCurrentTaskWorkerForRepository(
 
 async function validateTaskManagementTransition(
   c: { env: Env; get: (key: string) => any },
-  action: "complete" | "release" | "cancel" | "reject",
+  action: "complete" | "release" | "stop" | "cancel" | "reject",
   task: Pick<Task, "board_id" | "status">,
 ): Promise<TaskIdentityType> {
   const identity = await taskManagementIdentity(c, task);
@@ -931,6 +975,7 @@ api.get("/api/openapi.json", (c) =>
       "/tasks/{taskId}/claim": taskActionOpenApi("claimTask", "task:claim", "agent"),
       "/tasks/{taskId}/assign": taskActionOpenApi("assignTask", "task:assign", "agent"),
       "/tasks/{taskId}/release": taskActionOpenApi("releaseTask", "task:release", "either"),
+      "/tasks/{taskId}/stop": taskActionOpenApi("stopTask", "task:stop", "either"),
       "/tasks/{taskId}/review": taskActionOpenApi("reviewTask", "task:review", "agent"),
       "/tasks/{taskId}/complete": taskActionOpenApi("completeTask", "task:complete", "either"),
       "/tasks/{taskId}/reject": taskActionOpenApi("rejectTask", "task:reject", "either"),
@@ -1518,6 +1563,7 @@ api.post("/api/agents", async (c) => {
     kind?: "worker" | "leader";
     handoff_to?: string[];
     runtime: string;
+    connectors?: string[];
     model?: string;
     skills?: string[];
     subagents?: string[];
@@ -1531,6 +1577,7 @@ api.post("/api/agents", async (c) => {
   assertValidAgentRole(body.role);
   assertValidHandoffRoles(body.handoff_to);
   assertValidAgentRuntime(body.runtime, body.kind ?? "worker");
+  assertValidAgentConnectors(body.connectors, body.runtime);
   if (body.role && RESERVED_ROLES.has(body.role)) {
     throw new HTTPException(403, { message: `Role "${body.role}" is reserved for built-in agents` });
   }
@@ -1636,6 +1683,7 @@ api.patch("/api/agents/:id", async (c) => {
   assertValidAgentRole(updates.role);
   assertValidHandoffRoles(updates.handoff_to);
   assertValidAgentRuntime(updates.runtime, existing.kind);
+  assertValidAgentConnectors(updates.connectors, updates.runtime ?? existing.runtime);
   assertValidSkillRefs(updates.skills);
   assertValidAgentTaints(updates.taints);
   assertSubagentList(updates.subagents);
@@ -1874,6 +1922,7 @@ api.use("/api/tasks/:id", async (c, next) => {
 api.post("/api/tasks", async (c) => {
   const body = await c.req.json();
   normalizeTaskDetailAlias(body);
+  normalizeTaskHarness(body);
   if (!body.title) throw new HTTPException(400, { message: "title is required" });
 
   if (body.input !== undefined && body.input !== null && typeof body.input !== "object") {
@@ -1889,16 +1938,26 @@ api.post("/api/tasks", async (c) => {
   }
 
   const { actorType, actorId } = resolveActor(c);
-  const runtimeSource = body.assigned_to
-    ? await resolveAssignableWorkerRuntimeSource(c.env.DB, c.env, c.get("ownerId"), body.assigned_to, 400)
-    : null;
+  let routing: { source: "ama" | "legacy"; runtime: AgentRuntime } | null = null;
+  if (body.assigned_to) {
+    try {
+      routing = await resolveAssignableWorkerRuntimeSource(c.env.DB, c.env, c.get("ownerId"), body.assigned_to, 400);
+    } catch (error) {
+      const status = (error as { status?: unknown }).status;
+      if (status !== 409) throw error;
+    }
+  }
   const task = await createTask(c.env.DB, c.get("ownerId"), {
     ...body,
-    ...(runtimeSource ? { metadata: metadataWithRuntimeSource(body.metadata, runtimeSource) } : {}),
+    ...(routing ? { metadata: metadataWithRuntimeRouting(body.metadata, routing.source, routing.runtime) } : {}),
     actorType,
     actorId,
     skipRuntimeAvailability: isAmaTaskDispatchConfigured(c.env),
   });
+  if (body.assigned_to && !routing) {
+    const stopped = await stopTask(c.env.DB, task.id, actorType, actorId, await taskIdentity(c), "no eligible connector is currently online");
+    return c.json(stopped, 201);
+  }
   let dispatched: Task;
   try {
     dispatched = await dispatchAssignedTask(c.env.DB, c.env, c.get("ownerId"), task, { apiOrigin: new URL(c.req.url).origin });
@@ -2029,6 +2088,7 @@ api.get("/api/tasks/:id/session/ws", async (c) => {
 api.patch("/api/tasks/:id", async (c) => {
   const body = await c.req.json();
   normalizeTaskDetailAlias(body);
+  normalizeTaskHarness(body);
 
   if (body.input !== undefined && body.input !== null && typeof body.input !== "object") {
     throw new HTTPException(400, { message: "input must be a JSON object or null" });
@@ -2111,6 +2171,18 @@ api.post("/api/tasks/:id/release", async (c) => {
   return c.json(dispatched);
 });
 
+api.post("/api/tasks/:id/stop", async (c) => {
+  const { actorType, actorId, sessionId } = resolveActor(c);
+  const body = await c.req.json<{ reason?: string }>().catch(() => ({}) as { reason?: string });
+  const task = await getTask(c.env.DB, c.req.param("id"), c.get("ownerId"));
+  if (!task) throw new HTTPException(404, { message: "Task not found" });
+  const identity = await validateTaskManagementTransition(c, "stop", task);
+
+  await releaseAssignedTaskRuntime(c.env.DB, c.env, c.get("ownerId"), task, "policy");
+  const stopped = await stopTask(c.env.DB, task.id, actorType, actorId, identity, body.reason, sessionId);
+  return c.json(stopped);
+});
+
 api.post("/api/tasks/:id/assign", async (c) => {
   const body = await c.req.json<{ agent_id: string }>();
   const targetAgentId = body.agent_id;
@@ -2122,10 +2194,15 @@ api.post("/api/tasks/:id/assign", async (c) => {
   await requireTaskManager(c, existing);
   if (existing.status === "todo" && existing.assigned_to === targetAgentId) {
     const existingSource = taskRuntimeSource(existing);
-    const source = existingSource ?? (await resolveAssignableWorkerRuntimeSource(c.env.DB, c.env, c.get("ownerId"), targetAgentId, 404));
+    const routing = existingSource ? null : await resolveAssignableWorkerRuntimeSource(c.env.DB, c.env, c.get("ownerId"), targetAgentId, 404);
     const routed = existingSource
       ? existing
-      : ((await updateTask(c.env.DB, existing.id, { metadata: metadataWithRuntimeSource(existing.metadata, source) }, c.get("ownerId"))) ?? existing);
+      : ((await updateTask(
+          c.env.DB,
+          existing.id,
+          { metadata: metadataWithRuntimeRouting(existing.metadata, routing!.source, routing!.runtime) },
+          c.get("ownerId"),
+        )) ?? existing);
     const dispatched = await dispatchAssignedTask(c.env.DB, c.env, c.get("ownerId"), routed, {
       apiOrigin: new URL(c.req.url).origin,
       takeover: true,
@@ -2142,11 +2219,21 @@ api.post("/api/tasks/:id/assign", async (c) => {
   if (hasNoScheduleTaint(targetAgent.taints)) {
     throw new HTTPException(409, { message: "Agent is tainted NoSchedule and cannot be assigned normal tasks" });
   }
-  const source = await resolveAssignableWorkerRuntimeSource(c.env.DB, c.env, c.get("ownerId"), targetAgentId, 404);
+  let routing: { source: "ama" | "legacy"; runtime: AgentRuntime } | null = null;
+  try {
+    routing = await resolveAssignableWorkerRuntimeSource(c.env.DB, c.env, c.get("ownerId"), targetAgentId, 404);
+  } catch (error) {
+    const status = (error as { status?: unknown }).status;
+    if (status !== 409) throw error;
+  }
+  if (!routing) {
+    const stopped = await stopTask(c.env.DB, existing.id, actorType, actorId, await requireTaskManager(c, existing), "no eligible connector is currently online");
+    return c.json(stopped);
+  }
   const routed = {
     ...existing,
     assigned_to: targetAgentId,
-    metadata: metadataWithRuntimeSource(existing.metadata, source),
+    metadata: metadataWithRuntimeRouting(existing.metadata, routing.source, routing.runtime),
   };
 
   const assignmentToken = newLongId();
@@ -2332,13 +2419,51 @@ api.get("/api/boards/:id/stream", async (c) => {
   return createBoardSSEResponse(c.env, c.req.param("id"), c.get("ownerId"));
 });
 
+// ─── Workspaces ───
+
+api.post("/api/workspaces", async (c) => {
+  const body = await c.req.json<{ name?: string; description?: string }>();
+  if (!body.name?.trim()) throw new HTTPException(400, { message: "name is required" });
+  const workspace = await createWorkspace(c.env.DB, c.get("ownerId"), body.name.trim(), body.description);
+  return c.json(workspace, 201);
+});
+
+api.get("/api/workspaces", async (c) => {
+  const workspaces = await listWorkspaces(c.env.DB, c.get("ownerId"));
+  return c.json(workspaces);
+});
+
+api.get("/api/workspaces/:id", async (c) => {
+  const workspace = await getWorkspace(c.env.DB, c.get("ownerId"), c.req.param("id"));
+  if (!workspace) throw new HTTPException(404, { message: "Workspace not found" });
+  return c.json(workspace);
+});
+
+api.get("/api/workspaces/:id/repositories", async (c) => {
+  const workspace = await getWorkspace(c.env.DB, c.get("ownerId"), c.req.param("id"));
+  if (!workspace) throw new HTTPException(404, { message: "Workspace not found" });
+  const repositories = await listWorkspaceRepositories(c.env.DB, c.get("ownerId"), workspace.id);
+  return c.json(repositories);
+});
+
+api.post("/api/workspaces/:id/repositories", async (c) => {
+  const workspace = await getWorkspace(c.env.DB, c.get("ownerId"), c.req.param("id"));
+  if (!workspace) throw new HTTPException(404, { message: "Workspace not found" });
+  const body = await c.req.json<{ repository_id?: string }>();
+  if (!body.repository_id) throw new HTTPException(400, { message: "repository_id is required" });
+  const repository = await getRepository(c.env.DB, body.repository_id, c.get("ownerId"));
+  if (!repository) throw new HTTPException(404, { message: "Repository not found" });
+  await recordWorkspaceRepository(c.env.DB, workspace.id, repository.id);
+  return c.json({ ok: true });
+});
+
 // ─── Boards ───
 
 api.post("/api/boards", async (c) => {
-  const body = await c.req.json<{ name: string; description?: string; type: string }>();
+  const body = await c.req.json<{ name: string; description?: string; type: string; workspace_id?: string }>();
   if (!body.name) throw new HTTPException(400, { message: "name is required" });
   if (!isBoardType(body.type)) throw new HTTPException(400, { message: "type must be 'dev' or 'ops'" });
-  const board = await createBoard(c.env.DB, c.get("ownerId"), body.name, body.type, body.description);
+  const board = await createBoard(c.env.DB, c.get("ownerId"), body.name, body.type, body.description, body.workspace_id);
   return c.json(board, 201);
 });
 

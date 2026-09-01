@@ -8,6 +8,7 @@ interface TasksByStatus {
   in_progress: number;
   in_review: number;
   done: number;
+  stopped: number;
   cancelled: number;
 }
 
@@ -24,6 +25,7 @@ const STATUS_BAR_CLASS: Record<string, string> = {
   in_progress: "bg-accent",
   in_review: "bg-warning",
   done: "bg-success",
+  stopped: "bg-warning/60",
   cancelled: "bg-zinc-700",
 };
 
@@ -32,6 +34,7 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: "In Progress",
   in_review: "In Review",
   done: "Done",
+  stopped: "Stopped",
   cancelled: "Cancelled",
 };
 
@@ -66,7 +69,7 @@ function StatCardSkeleton() {
 type StatusKey = keyof TasksByStatus;
 
 function TaskStatusBar({ byStatus }: { byStatus: TasksByStatus }) {
-  const statuses: StatusKey[] = ["todo", "in_progress", "in_review", "done", "cancelled"];
+  const statuses: StatusKey[] = ["todo", "in_progress", "in_review", "done", "stopped", "cancelled"];
   const total = statuses.reduce((sum, s) => sum + (byStatus[s] || 0), 0);
 
   if (total === 0) return null;
@@ -109,7 +112,7 @@ export function AdminDashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const tasksByStatus: TasksByStatus = stats?.tasks ?? { todo: 0, in_progress: 0, in_review: 0, done: 0, cancelled: 0 };
+  const tasksByStatus: TasksByStatus = stats?.tasks ?? { todo: 0, in_progress: 0, in_review: 0, done: 0, stopped: 0, cancelled: 0 };
   const taskTotal = Object.values(tasksByStatus).reduce((sum, n) => sum + n, 0);
   const activeTaskCount = (tasksByStatus.in_progress || 0) + (tasksByStatus.in_review || 0);
 

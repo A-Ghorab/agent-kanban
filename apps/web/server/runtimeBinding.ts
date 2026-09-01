@@ -3,6 +3,7 @@ import type { Task } from "@agent-kanban/shared";
 export type TaskRuntimeSource = "ama" | "legacy";
 
 export const TASK_RUNTIME_SOURCE_ANNOTATION = "runtime.source";
+export const TASK_RUNTIME_CONNECTOR_ANNOTATION = "runtime.connector";
 
 type Annotations = Record<string, unknown>;
 
@@ -23,6 +24,15 @@ export function metadataWithRuntimeSource(metadata: unknown, source: TaskRuntime
   next.annotations = {
     ...metadataObject(next.annotations),
     [TASK_RUNTIME_SOURCE_ANNOTATION]: source,
+  };
+  return next;
+}
+
+export function metadataWithRuntimeRouting(metadata: unknown, source: TaskRuntimeSource, connectorRuntime: string): Record<string, unknown> {
+  const next = { ...metadataWithRuntimeSource(metadata, source) };
+  next.annotations = {
+    ...metadataObject(next.annotations),
+    [TASK_RUNTIME_CONNECTOR_ANNOTATION]: connectorRuntime,
   };
   return next;
 }

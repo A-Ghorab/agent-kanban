@@ -7,13 +7,14 @@ import { useAgentPresenceFromEvents } from "../hooks/useAgentPresence";
 import { usePublicBoardSSE } from "../hooks/usePublicBoardSSE";
 import { api } from "../lib/api";
 
-const TASK_STATUSES = ["todo", "in_progress", "in_review", "done", "cancelled"] as const;
+const TASK_STATUSES = ["todo", "in_progress", "in_review", "done", "stopped", "cancelled"] as const;
 
 const TASK_STATUS_LABELS: Record<string, string> = {
   todo: "Todo",
   in_progress: "In Progress",
   in_review: "In Review",
   done: "Done",
+  stopped: "Stopped",
   cancelled: "Cancelled",
 };
 

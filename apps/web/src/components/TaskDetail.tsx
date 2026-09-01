@@ -28,6 +28,7 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   in_progress: "In Progress",
   in_review: "In Review",
   done: "Done",
+  stopped: "Stopped",
   cancelled: "Cancelled",
 };
 
@@ -258,6 +259,23 @@ export function TaskDetail({ taskId, labels = [], onClose, onRefresh, onAgentCli
           <pre className="text-xs font-mono bg-surface-primary border border-border rounded-md p-3 text-content-secondary overflow-x-auto">
             {JSON.stringify(task.input, null, 2)}
           </pre>
+        </div>
+      )}
+
+      {Array.isArray(task.harness) && task.harness.length > 0 && (
+        <div>
+          <FieldLabel>Work Harness</FieldLabel>
+          <div className="space-y-1.5">
+            {task.harness.map((item: any) => (
+              <div key={item.id} className="flex items-start gap-2 text-sm">
+                <span className={`mt-1 h-2 w-2 rounded-full ${item.completed ? "bg-success" : "bg-warning"}`} />
+                <div className="min-w-0">
+                  <div className={item.completed ? "text-content-tertiary line-through" : "text-content-primary"}>{item.title}</div>
+                  {item.notes && <div className="text-xs text-content-tertiary">{item.notes}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

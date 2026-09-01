@@ -1,4 +1,4 @@
-import type { BoardAction, CreateTaskInput, IdentityType, Task, TaskAction, TaskActionType, TaskStatus, TaskWithNotes } from "@agent-kanban/shared";
+import type { BoardAction, CreateTaskInput, IdentityType, Task, TaskAction, TaskStatus, TaskTransition, TaskWithNotes } from "@agent-kanban/shared";
 import { hasNoScheduleTaint, validateTransition } from "@agent-kanban/shared";
 import { HTTPException } from "hono/http-exception";
 import { getDefaultBoard } from "./boardRepo";
@@ -6,9 +6,16 @@ import { recordBoardRepository } from "./boardRepositoryRepo";
 import { type D1, MAX_TASK_PARTITION_ROWS, newLongId, parseJsonFields } from "./db";
 import { isRuntimeAvailable } from "./machineRepo";
 import { computeBlocked, detectCycle, getDependencies, setDependencies } from "./taskDeps";
+import { recordWorkspaceRepository } from "./workspaceRepositoryRepo";
+
+async function recordWorkspaceRepositoryFromBoard(db: D1, boardId: string, repositoryId: string): Promise<void> {
+  const board = await db.prepare("SELECT workspace_id FROM boards WHERE id = ?").bind(boardId).first<{ workspace_id: string }>();
+  if (!board?.workspace_id) return;
+  await recordWorkspaceRepository(db, board.workspace_id, repositoryId);
+}
 
 const parseTask = <T extends Task>(row: T & { result?: string | null }): T => {
-  const task = parseJsonFields(row, ["labels", "input", "metadata"]) as T & { result?: string | null };
+  const task = parseJsonFields(row, ["labels", "input", "metadata", "harness"]) as T & { result?: string | null };
   delete task.result;
   return task;
 };
@@ -52,8 +59,8 @@ async function assertOwnedTaskIds(db: D1, ownerId: string, taskIds: string[], me
   if (row?.count !== ids.length) throw new HTTPException(400, { message });
 }
 
-function enforceTransition(action: TaskActionType, currentStatus: TaskStatus, identity: IdentityType): void {
-  const error = validateTransition(action as any, currentStatus, identity);
+function enforceTransition(action: TaskTransition, currentStatus: TaskStatus, identity: IdentityType): void {
+  const error = validateTransition(action, currentStatus, identity);
   if (error) {
     const status = error.code === "FORBIDDEN" ? 403 : 409;
     throw new HTTPException(status, { message: error.message });
@@ -146,8 +153,8 @@ export async function createTask(
   const stmts = [
     db
       .prepare(`
-      INSERT INTO tasks (id, board_id, seq, status, title, description, repository_id, labels, created_by, assigned_to, result, pr_url, input, metadata, created_from, scheduled_at, position, created_at, updated_at)
-      VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (id, board_id, seq, status, title, description, repository_id, labels, created_by, assigned_to, result, pr_url, input, metadata, story_type, harness, created_from, scheduled_at, position, created_at, updated_at)
+      VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .bind(
         taskId,
@@ -161,6 +168,8 @@ export async function createTask(
         input.assigned_to || null,
         inputJson,
         metadataJson,
+        input.story_type ?? "story",
+        input.harness ? JSON.stringify(input.harness) : null,
         input.created_from || null,
         input.scheduled_at || null,
         position,
@@ -185,7 +194,10 @@ export async function createTask(
   ];
 
   await db.batch(stmts);
-  if (input.repository_id) await recordBoardRepository(db, board.id, input.repository_id);
+  if (input.repository_id) {
+    await recordBoardRepository(db, board.id, input.repository_id);
+    await recordWorkspaceRepositoryFromBoard(db, board.id, input.repository_id);
+  }
 
   return {
     id: taskId,
@@ -201,6 +213,8 @@ export async function createTask(
     pr_url: null,
     input: input.input || null,
     metadata: input.metadata || {},
+    story_type: input.story_type ?? "story",
+    harness: input.harness || null,
     created_from: input.created_from || null,
     scheduled_at: input.scheduled_at || null,
     position,
@@ -331,6 +345,8 @@ export async function updateTask(
   updates: Partial<Pick<Task, "title" | "description" | "repository_id" | "labels" | "pr_url" | "input" | "position" | "scheduled_at">> & {
     metadata?: Record<string, unknown>;
     depends_on?: string[];
+    harness?: Task["harness"];
+    story_type?: Task["story_type"];
   },
   ownerId?: string,
 ): Promise<Task | null> {
@@ -364,8 +380,8 @@ export async function updateTask(
   const sets: string[] = ["updated_at = ?"];
   const binds: unknown[] = [now];
 
-  const jsonFields = new Set(["labels", "input", "metadata"]);
-  const allowedFields = ["title", "description", "repository_id", "labels", "pr_url", "input", "metadata", "position", "scheduled_at"] as const;
+  const jsonFields = new Set(["labels", "input", "metadata", "harness"]);
+  const allowedFields = ["title", "description", "repository_id", "labels", "pr_url", "input", "metadata", "harness", "story_type", "position", "scheduled_at"] as const;
   for (const field of allowedFields) {
     if (field in updates && (updates as any)[field] !== undefined) {
       sets.push(`${field} = ?`);
@@ -380,7 +396,10 @@ export async function updateTask(
     .prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?${ownerId ? " AND board_id IN (SELECT id FROM boards WHERE owner_id = ?)" : ""}`)
     .bind(...binds)
     .run();
-  if (updates.repository_id) await recordBoardRepository(db, task.board_id, updates.repository_id);
+  if (updates.repository_id) {
+    await recordBoardRepository(db, task.board_id, updates.repository_id);
+    await recordWorkspaceRepositoryFromBoard(db, task.board_id, updates.repository_id);
+  }
 
   return parseTask({ ...task, ...updates, updated_at: now } as Task);
 }
@@ -396,7 +415,7 @@ export async function deleteTask(db: D1, taskId: string, ownerId: string): Promi
     .first<{ status: string; assigned_to: string | null }>();
   if (!task) return false;
 
-  const canDelete = task.status === "todo" || task.status === "cancelled";
+  const canDelete = task.status === "todo" || task.status === "stopped" || task.status === "cancelled";
   if (!canDelete) {
     throw new HTTPException(409, { message: `Cannot delete task in ${task.status}${task.assigned_to ? " (assigned)" : ""} status` });
   }
@@ -605,7 +624,11 @@ export async function completeTask(
 ): Promise<Task | null> {
   const task = await db.prepare("SELECT * FROM tasks WHERE id = ?").bind(taskId).first<Task>();
   if (!task) return null;
-  enforceTransition("complete" as any, task.status as TaskStatus, identity);
+  const parsedTask = parseTask(task);
+  if (parsedTask.harness?.some((item) => !item.completed)) {
+    throw new HTTPException(409, { message: "All harness checklist items must be completed before marking the task done" });
+  }
+  enforceTransition("complete" as any, parsedTask.status as TaskStatus, identity);
 
   const now = new Date().toISOString();
   const logId = newLongId();
@@ -619,7 +642,34 @@ export async function completeTask(
       .bind(logId, taskId, actorType, actorId, null, sessionId, now),
   ]);
 
-  return parseTask({ ...task, status: "done" as const, updated_at: now });
+  return parseTask({ ...parsedTask, status: "done" as const, updated_at: now });
+}
+
+export async function stopTask(
+  db: D1,
+  taskId: string,
+  actorType: string,
+  actorId: string,
+  identity: IdentityType,
+  reason?: string,
+  sessionId: string | null = null,
+): Promise<Task | null> {
+  const task = await db.prepare("SELECT * FROM tasks WHERE id = ?").bind(taskId).first<Task>();
+  if (!task) return null;
+  enforceTransition("stop", task.status as TaskStatus, identity);
+
+  const now = new Date().toISOString();
+  const logId = newLongId();
+  await db.batch([
+    db.prepare("UPDATE tasks SET status = 'stopped', assigned_to = NULL, updated_at = ? WHERE id = ?").bind(now, taskId),
+    db
+      .prepare(
+        "INSERT INTO task_actions (id, task_id, actor_type, actor_id, action, detail, session_id, created_at) VALUES (?, ?, ?, ?, 'stopped', ?, ?, ?)",
+      )
+      .bind(logId, taskId, actorType, actorId, reason || "stopped", sessionId, now),
+  ]);
+
+  return parseTask({ ...task, status: "stopped" as const, assigned_to: null, updated_at: now });
 }
 
 export async function cancelTask(

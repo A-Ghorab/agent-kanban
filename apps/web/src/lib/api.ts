@@ -44,6 +44,7 @@ export const api = {
     claim: (id: string) => request<any>("POST", `/tasks/${id}/claim`),
     complete: (id: string) => request<any>("POST", `/tasks/${id}/complete`),
     release: (id: string) => request<any>("POST", `/tasks/${id}/release`),
+    stop: (id: string, reason?: string) => request<any>("POST", `/tasks/${id}/stop`, reason ? { reason } : {}),
     cancel: (id: string) => request<any>("POST", `/tasks/${id}/cancel`),
     review: (id: string) => request<any>("POST", `/tasks/${id}/review`),
     reject: (id: string) => request<any>("POST", `/tasks/${id}/reject`),
@@ -90,6 +91,7 @@ export const api = {
       role?: string;
       handoff_to?: string[];
       runtime: AgentRuntime;
+      connectors?: AgentRuntime[];
       model?: string;
       skills?: string[];
     }) => request<any>("POST", "/agents", input),
@@ -118,7 +120,7 @@ export const api = {
   boards: {
     list: () => request<any[]>("GET", "/boards"),
     get: (id: string) => request<any>("GET", `/boards/${id}`),
-    create: (input: { name: string; type: "dev" | "ops"; description?: string }) => request<any>("POST", "/boards", input),
+    create: (input: { name: string; type: "dev" | "ops"; description?: string; workspace_id?: string }) => request<any>("POST", "/boards", input),
     update: (id: string, body: { name?: string; description?: string; visibility?: "private" | "public"; labels?: any[] }) =>
       request<any>("PATCH", `/boards/${id}`, body),
     createLabel: (id: string, body: { name: string; color: string; description?: string }) => request<any>("POST", `/boards/${id}/labels`, body),
@@ -159,6 +161,13 @@ export const api = {
     list: () => request<Repository[]>("GET", "/repositories"),
     create: (input: { name: string; url: string }) => request<Repository>("POST", "/repositories", input),
     delete: (id: string) => request<void>("DELETE", `/repositories/${id}`),
+  },
+  workspaces: {
+    list: () => request<any[]>("GET", "/workspaces"),
+    get: (id: string) => request<any>("GET", `/workspaces/${id}`),
+    create: (input: { name: string; description?: string }) => request<any>("POST", "/workspaces", input),
+    repositories: (id: string) => request<any[]>("GET", `/workspaces/${id}/repositories`),
+    addRepository: (id: string, repositoryId: string) => request<any>("POST", `/workspaces/${id}/repositories`, { repository_id: repositoryId }),
   },
   githubApp: {
     config: () => request<GithubAppConfig>("GET", "/github-app/config"),

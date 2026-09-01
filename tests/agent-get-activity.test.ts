@@ -94,6 +94,7 @@ describe("getAgent activity", () => {
       in_progress: 1,
       in_review: 1,
       done: 1,
+      stopped: 0,
       cancelled: 1,
     });
     expect(activity).toMatchObject({

@@ -6,6 +6,7 @@ import { type D1, newId, parseJsonFields } from "./db";
 const nanoidSlug = customAlphabet("0123456789abcdefghijklmnopqrstuvwxyz", 10);
 
 import { computeBlocked } from "./taskDeps";
+import { ensureDefaultWorkspace, getWorkspace } from "./workspaceRepo";
 
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 
@@ -33,12 +34,21 @@ function normalizeLabels(labels: BoardLabel[]): BoardLabel[] {
   });
 }
 
-export async function createBoard(db: D1, ownerId: string, name: string, type: BoardType, description?: string): Promise<Board> {
+export async function createBoard(
+  db: D1,
+  ownerId: string,
+  name: string,
+  type: BoardType,
+  description?: string,
+  workspaceId?: string,
+): Promise<Board> {
+  const workspace = workspaceId ? await getWorkspace(db, ownerId, workspaceId) : await ensureDefaultWorkspace(db, ownerId);
+  if (!workspace) throw new HTTPException(404, { message: "Workspace not found" });
   const id = newId();
   const now = new Date().toISOString();
   await db
-    .prepare("INSERT INTO boards (id, owner_id, name, description, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, ownerId, name, description || null, type, now, now)
+    .prepare("INSERT INTO boards (id, owner_id, workspace_id, name, description, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, ownerId, workspace.id, name, description || null, type, now, now)
     .run();
 
   const board = await db.prepare("SELECT * FROM boards WHERE id = ?").bind(id).first<Board>();
@@ -66,7 +76,7 @@ export async function getBoard(db: D1, boardId: string, ownerId: string): Promis
     LEFT JOIN repositories r ON t.repository_id = r.id
     WHERE t.board_id = ?
     ORDER BY
-      CASE t.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'in_review' THEN 2 WHEN 'done' THEN 3 ELSE 4 END,
+      CASE t.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'in_review' THEN 2 WHEN 'done' THEN 3 WHEN 'stopped' THEN 4 ELSE 5 END,
       CASE WHEN t.status = 'todo' THEN t.position END ASC,
       CASE WHEN t.status != 'todo' THEN t.updated_at END DESC
   `)
@@ -81,7 +91,7 @@ export async function getBoard(db: D1, boardId: string, ownerId: string): Promis
     }
   }
 
-  return parseBoard({ ...board, tasks: tasks.results.map((t) => parseJsonFields(t, ["labels", "input", "metadata"])) });
+  return parseBoard({ ...board, tasks: tasks.results.map((t) => parseJsonFields(t, ["labels", "input", "metadata", "harness"])) });
 }
 
 export async function getDefaultBoard(db: D1, ownerId: string): Promise<Board | null> {
@@ -222,14 +232,14 @@ export async function getBoardBySlug(db: D1, slug: string): Promise<BoardWithTas
     LEFT JOIN repositories r ON t.repository_id = r.id
     WHERE t.board_id = ?
     ORDER BY
-      CASE t.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'in_review' THEN 2 WHEN 'done' THEN 3 ELSE 4 END,
+      CASE t.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'in_review' THEN 2 WHEN 'done' THEN 3 WHEN 'stopped' THEN 4 ELSE 5 END,
       CASE WHEN t.status = 'todo' THEN t.position END ASC,
       CASE WHEN t.status != 'todo' THEN t.updated_at END DESC
   `)
     .bind(board.id)
     .all<Task>();
 
-  return parseBoard({ ...board, tasks: tasks.results.map((t) => parseJsonFields(t, ["labels", "input", "metadata"])) });
+  return parseBoard({ ...board, tasks: tasks.results.map((t) => parseJsonFields(t, ["labels", "input", "metadata", "harness"])) });
 }
 
 export async function deleteBoard(db: D1, boardId: string, ownerId: string): Promise<boolean> {

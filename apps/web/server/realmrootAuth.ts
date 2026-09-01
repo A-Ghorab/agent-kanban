@@ -26,6 +26,7 @@ export const AK_SCOPES = [
   "task:complete",
   "task:reject",
   "task:cancel",
+  "task:stop",
   "task:log",
   "task:message",
   "agent:usage",

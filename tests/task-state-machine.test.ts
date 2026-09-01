@@ -148,7 +148,7 @@ describe("validateTransition", () => {
   it("rejects release from in_review", () => {
     expect(validateTransition("release", "in_review", "machine")).toEqual({
       code: "INVALID_TRANSITION",
-      message: "Cannot release from in_review (allowed from: in_progress)",
+      message: "Cannot release from in_review (allowed from: in_progress, stopped)",
     });
   });
 
